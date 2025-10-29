@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Filterable Interactive Dictionary</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom font import for better aesthetics */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Light gray background */
+            min-height: 100vh;
+        }
+    </style>
+</head>
+<body class="p-4 flex items-center justify-center">
+
+    <div class="w-full max-w-lg bg-white shadow-2xl rounded-xl p-6 md:p-8 space-y-6">
+        <h1 class="text-3xl font-extrabold text-gray-900 text-center border-b pb-4">Word Explorer</h1>
+        <!-- Search Input and Button Container -->
+        <div class="flex flex-col sm:flex-row gap-3">
+            <input
+                type="text"
+                id="wordInput"
+                placeholder="Search a word"
+                class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 shadow-inner transition duration-150"
+                onkeypress="if(event.key === 'Enter') lookupWord()"
+            >
+            <button
+                id="searchButton"
+                onclick="lookupWord()"
+                class="w-full sm:w-auto px-6 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition duration-200 ease-in-out transform hover:scale-[1.01] active:scale-[0.99]"
+            >
+                Search
+            </button>
+        </div>
+
+        <!-- Result Display Area -->
+        <div id="resultCard" class="hidden p-6 border-l-4 border-indigo-500 bg-indigo-50 rounded-lg shadow-inner transition-all duration-300">
+            <p class="text-xl font-bold text-indigo-700 mb-2" id="resultWord"></p>
+            <p class="text-gray-700" id="resultDefinition"></p>
+        </div>
+
+        <!-- Alphabet Filter and Full List Display -->
+        <div class="pt-4 border-t border-gray-200 space-y-4">
+            <h2 class="text-xl font-bold text-gray-800">Complete Word List</h2>
+
+            <!-- Dropdown Filter and Reset Button -->
+            <!-- Added flex-wrap for mobile robustness -->
+            <div class="flex flex-wrap items-center gap-3">
+                <label for="alphabetFilter" class="text-sm font-medium text-gray-700">Filter:</label>
+                <select 
+                    id="alphabetFilter" 
+                    class="p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 flex-grow transition duration-150" 
+                    onchange="filterDictionaryList()"
+                >
+                    <!-- Options populated by JS -->
+                </select>
+                <button 
+                    onclick="resetFilter()" 
+                    class="text-sm px-3 py-1 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition duration-150 font-medium"
+                >
+                    Show All
+                </button>
+            </div>
+
+            <!-- Dictionary List (Reverted to vertical list structure) -->
+            <div id="fullDictionaryList" class="max-h-96 overflow-y-auto border border-gray-300 rounded-lg p-3 bg-gray-50 shadow-md">
+                <!-- List items will be rendered here by JS -->
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- Core Dictionary Data ---
+        // A list of 11 words and their definitions
+        const dictionary = {
+            "ephemeral": "Lasting for a very short timeLasting for a very short timeLasting for a very short timeLasting for a very short timeLasting for a very short timeLasting for a very short timeLasting for a very short timeLasting for a very short time.",
+            "ubiquitous": "Present, appearing, or found everywhere.",
+            "serendipity": "The occurrence and development of events by chance in a happy or beneficial way.",
+            "mellifluous": "A sound that is sweet and musical; pleasant to hear.",
+            "quixotic": "Exceedingly idealistic; unrealistic and impractical.",
+            "solipsism": "The view or theory that the self is all that can be known to exist.",
+            "petrichor": "A pleasant, earthy scent that usually accompanies the first rain after a long dry spell.",
+            "defenestration": "The act of throwing someone or something out of a window.",
+            "lugubrious": "Looking or sounding sad and dismal.",
+            "cacophony": "A harsh, discordant mixture of sounds.",
+            "ineffable": "Too great or extreme to be expressed or described in words."
+        };
+
+        // DOM elements
+        const wordInput = document.getElementById('wordInput');
+        const resultCard = document.getElementById('resultCard');
+        const resultWord = document.getElementById('resultWord');
+        const resultDefinition = document.getElementById('resultDefinition');
+        const alphabetFilter = document.getElementById('alphabetFilter');
+        const fullDictionaryList = document.getElementById('fullDictionaryList');
+
+        /**
+         * Looks up the word entered by the user and displays the result.
+         */
+        function lookupWord() {
+            const input = wordInput.value;
+            // Normalize input: trim whitespace and convert to lowercase for robust matching
+            const key = input.trim().toLowerCase();
+
+            // Check if the word exists in the dictionary
+            if (dictionary.hasOwnProperty(key)) {
+                const definition = dictionary[key];
+                
+                // Update result card with definition
+                resultWord.textContent = input;
+                resultDefinition.textContent = definition;
+                resultCard.classList.remove('hidden');
+                
+                // Success styling
+                resultCard.classList.remove('border-red-500', 'bg-red-50');
+                resultCard.classList.add('border-indigo-500', 'bg-indigo-50');
+
+            } else {
+                // Word not found
+                resultWord.textContent = input;
+                resultDefinition.textContent = "Word not found in this dictionary. Try filtering the list below to find a word!";
+                resultCard.classList.remove('hidden');
+
+                // Failure styling
+                resultCard.classList.remove('border-indigo-500', 'bg-indigo-50');
+                resultCard.classList.add('border-red-500', 'bg-red-50');
+            }
+        }
+
+        /**
+         * Populates the A-Z filter dropdown.
+         */
+        function populateFilter() {
+            // Add "All" option
+            alphabetFilter.innerHTML = '<option value="">All (A-Z)</option>';
+            
+            // Generate letters A-Z (ASCII codes 65-90)
+            for (let i = 65; i <= 90; i++) {
+                const letter = String.fromCharCode(i);
+                const option = document.createElement('option');
+                option.value = letter.toLowerCase();
+                option.textContent = letter;
+                alphabetFilter.appendChild(option);
+            }
+        }
+
+        /**
+         * Renders the dictionary list, filtered by the current dropdown selection.
+         */
+        function renderDictionaryList() {
+            const filter = alphabetFilter.value; // "" or a single lowercase letter
+            const words = Object.keys(dictionary);
+            
+            // 1. Sort words alphabetically
+            words.sort();
+            
+            let htmlContent = '';
+            
+            words.forEach(word => {
+                // 2. Apply filter check
+                if (!filter || word.startsWith(filter)) {
+                    
+                    // Format: Vertical list item with border, only showing the word (capitalized)
+                    htmlContent += `
+                        <div 
+                            class="py-2 px-3 border-b border-gray-200 last:border-b-0 hover:bg-gray-100 transition duration-100 rounded-md cursor-pointer" 
+                            onclick="selectWord('${word}')"
+                        >
+                            <p class="font-semibold text-gray-900">${word.charAt(0).toUpperCase() + word.slice(1)}</p>
+                        </div>
+                    `;
+                }
+            });
+
+            if (!htmlContent) {
+                 // Removed col-span-full as we are no longer using a grid
+                 fullDictionaryList.innerHTML = '<p class="text-center text-gray-500 p-4">No words found starting with that letter. Try selecting "All".</p>';
+            } else {
+                fullDictionaryList.innerHTML = htmlContent;
+            }
+        }
+
+        /**
+         * Handler for the dropdown filter change.
+         */
+        function filterDictionaryList() {
+            renderDictionaryList();
+        }
+
+        /**
+         * Handler to reset the filter and display all words.
+         */
+        function resetFilter() {
+            alphabetFilter.value = "";
+            renderDictionaryList();
+        }
+        
+        /**
+         * Allows user to click a word in the list to populate the search field.
+         */
+        function selectWord(word) {
+            wordInput.value = word;
+            lookupWord();
+        }
+
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', () => {
+            populateFilter();
+            renderDictionaryList(); // Display the full list initially
+        });
+    </script>
+
+</body>
+</html>
