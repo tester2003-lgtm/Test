@@ -1,0 +1,10 @@
+node_modules/
+cypress.env.json
+cypress/videos/
+cypress/screenshots/
+cypress/downloads/
+.env
+.DS_Store
+
+# Scratch/explore specs (may contain hardcoded test data)
+cypress/e2e/_*.cy.js
