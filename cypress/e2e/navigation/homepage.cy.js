@@ -1,6 +1,6 @@
 // Navigation & general — Homepage loads (banner, menu, footer).
 // Site: BASE_URL in cypress/support/config.js
-// Run: npx cypress run --spec cypress/e2e/navigation/Homepage.cy.js
+// Run: npx cypress run --spec cypress/e2e/navigation/homepage.cy.js
 
 import { BASE_URL } from '../../support/config';
 

@@ -12,10 +12,10 @@
 // ── Running ───────────────────────────────────────────────────────────────────
 //
 //  UI + popup tests (Electron, always):
-//    npx cypress run --spec cypress/e2e/auth/Login-Facebook.cy.js
+//    npx cypress run --spec cypress/e2e/auth/login-facebook.cy.js
 //
 //  Full OAuth + programmatic tests (Chrome headed, requires credentials):
-//    npx cypress run --spec cypress/e2e/auth/Login-Facebook.cy.js \
+//    npx cypress run --spec cypress/e2e/auth/login-facebook.cy.js \
 //      --browser chrome --headed
 //
 // ── Credentials ───────────────────────────────────────────────────────────────
@@ -146,7 +146,7 @@ describe('Login - Facebook', () => {
   //
   // NOTE: The post-login behaviour (Profile, My Orders, cart, sign-out) is
   // identical for Facebook and email/password members, so it is already
-  // thoroughly covered by Login-member.cy.js, Cart.cy.js and SignOut.cy.js.
+  // thoroughly covered by login-email.cy.js, cart.cy.js and sign-out.cy.js.
   // These tests exist to confirm the Facebook auth path specifically.
 
   describe('Programmatic login via test user', () => {

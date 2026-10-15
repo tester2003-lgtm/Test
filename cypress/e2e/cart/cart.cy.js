@@ -1,6 +1,6 @@
 // Cart - add items, cart count, edit quantity, delete (Yes / No) and the empty cart.
 // Site: BASE_URL in cypress/support/config.js
-// Run: npx cypress run --spec cypress/e2e/cart-checkout/Cart.cy.js
+// Run: npx cypress run --spec cypress/e2e/cart/cart.cy.js
 //
 // Guest: every test starts with a fresh, empty cart.
 // Logged-in member: uses the account in cypress.env.json; each test empties the
@@ -340,7 +340,7 @@ describe('Cart', () => {
       signOut();
 
       // No reload here: after visiting a product page, a reload logs the member
-      // back in (sign-out bug, see the KNOWN BUG test in auth/SignOut.cy.js).
+      // back in (sign-out bug, see the KNOWN BUG test in auth/sign-out.cy.js).
       cartCount().should('have.text', '0');
       openCart();
       expectEmptyCart();

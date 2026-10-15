@@ -1,6 +1,6 @@
 // Register a new account - validation errors + successful sign up. Site: BASE_URL in cypress/support/config.js
 // Run: npx cypress open   (recommended - the successful sign-up test needs an emailed code)
-//      npx cypress run --spec cypress/e2e/auth/Register.cy.js
+//      npx cypress run --spec cypress/e2e/auth/register.cy.js
 //
 // Registering sends a 4-digit verification code to the email address. The
 // successful sign-up test waits (up to 5 min) in `cypress open` for you to type

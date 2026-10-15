@@ -1,5 +1,5 @@
 // Login with email and password - valid and invalid. Site: BASE_URL in cypress/support/config.js
-// Run: npx cypress run --spec cypress/e2e/auth/Login.cy.js
+// Run: npx cypress run --spec cypress/e2e/auth/login-email.cy.js
 //
 // The valid-login tests need an email/password member account. Put it in
 // cypress.env.json next to cypress.config.js (keep this file out of git):

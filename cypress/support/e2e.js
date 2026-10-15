@@ -15,3 +15,11 @@
 
 // Import commands.js using ES2015 syntax:
 import './commands'
+
+// cy.realClick / cy.realType: real browser input events (Chromium only). Used to type into
+// cross-origin iframes such as the Airwallex card fields, which normal cy.type() can't reach.
+import 'cypress-real-events'
+
+// Collects page URL and recent actions so failed tests get a draft bug report
+// (cypress/bug-reports/, written by cypress/plugins/bug-report.js).
+import './bug-report'

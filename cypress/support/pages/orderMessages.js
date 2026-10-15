@@ -1,97 +1,38 @@
-// Page object for the order "Send a message" messaging panel.
-// Used by:
-//   cypress/e2e/orders/customer-messages.cy.js  — customer side
-//   cypress/e2e/orders/admin-messages.cy.js     — admin side (future)
-//
-// Selectors confirmed from DOM are noted.
-// Selectors marked "TODO: verify" should be checked against the live DOM:
-//   open DevTools while the messaging panel is open and inspect the input,
-//   send button, file input, and message list elements.
+// Page object for the order "Messages" panel on /mypage/orders/<order_master_id>.
+// Selectors and rules checked against the live dev site and its code, Oct 2026.
+// Used by cypress/e2e/orders/customer-messages.cy.js.
 
-import { BASE_URL } from '../config';
+// "Messages" link on the order summary page.
+export const messageButton = () => cy.get('a[aria-label="Send a message"]', { timeout: 30000 }).first();
 
-// ── Trigger ───────────────────────────────────────────────────────────────────
-// Confirmed: <a aria-label="Send a message" class="odb_action message">
-// TODO: suggest adding data-cy="btn-open-messages" to this element.
-export const openMessages = () =>
-  cy.get('a[aria-label="Send a message"]').click({ force: true });
+// Sliding panel that opens from the right; its title is "Messages - #<invoice number>".
+export const panel = () => cy.get('.slider_container.slide_modal.active .message_slider', { timeout: 20000 });
+export const panelTitle = () => panel().find('.slider_header h3');
+export const closeButton = () => panel().find('a.slider_close');
 
-// ── Panel container ───────────────────────────────────────────────────────────
-// TODO: verify and replace with the actual panel/drawer selector.
-// Common candidates: .message_panel, .odb_message_section, [class*="msg_panel"]
-export const panel = () =>
-  cy.get('.message_panel, [class*="message_panel"], [class*="msg_panel"]', { timeout: 10000 });
+// Opens the form. Its label depends on the conversation: "Create Message" (no messages yet),
+// "Add Message" (last message was ours) or "Respond" (last message was from staff).
+export const newMessageButton = () => panel().find('.message-new__toggle button', { timeout: 20000 });
 
-// ── Message input ─────────────────────────────────────────────────────────────
-// TODO: verify — could be textarea, div[contenteditable], or input[type="text"].
-// TODO: suggest adding data-cy="message-input".
-export const messageInput = () =>
-  panel().find('textarea, [contenteditable="true"], input[type="text"]').first();
+export const messageForm = () => panel().find('form.message-new__form');
+export const messageInput = () => messageForm().find('textarea.g-textarea-main');
+// Shown under the text box when Send is clicked with no text (or only spaces) and no file.
+export const messageRequiredError = () => messageForm().find('p.g-textarea-error');
+export const sendButton = () => messageForm().contains('button[type="submit"]', 'Send Message');
+export const cancelButton = () => messageForm().contains('button', 'Cancel');
 
-// ── File attachment ───────────────────────────────────────────────────────────
-// TODO: verify — hidden file input; trigger via cy.selectFile with force: true.
-// TODO: suggest adding data-cy="file-input".
-export const fileInput = () => panel().find('input[type="file"]');
+// Files: .doc .docx .xls .xlsx .ppt .pptx .csv .eps .ai .psd .pdf .tif .tiff .zip .png .jpg .jpeg,
+// max 4 files / 50 MB total. The first input is the big drop zone; after the first file a smaller
+// "Select Files" input adds more, until there are 4.
+export const fileInput = () => messageForm().find('.message-new__dropzone input[type="file"]');
+export const addMoreFilesInput = () => messageForm().find('label.message-new__select-more input[type="file"]');
+export const addMoreFilesButton = () => messageForm().find('label.message-new__select-more');
+export const filePreviews = () => messageForm().find('.message-new__preview');
+export const removeFileButtons = () => messageForm().find('button.message-new__preview-remove');
+// File errors disappear after 4 seconds.
+export const fileError = () => messageForm().find('p.message-new__error');
 
-// ── Send button ───────────────────────────────────────────────────────────────
-// TODO: verify. Common: button.send_btn, button[type="submit"] inside panel.
-// TODO: suggest adding data-cy="btn-send-message".
-export const sendButton = () =>
-  panel().find('button').filter(':contains("Send"), [class*="send"], [type="submit"]').first();
-
-// ── Message list ──────────────────────────────────────────────────────────────
-// TODO: verify — container holding individual message items.
-// TODO: suggest adding data-cy="message-list" and data-cy="message-item".
-export const messageItems = () =>
-  panel().find('[class*="message_item"], [class*="msg_item"], [class*="chat_item"]');
-
-// ── Error / validation ────────────────────────────────────────────────────────
-// TODO: verify — inline error shown when a file is rejected or input is invalid.
-export const errorMessage = () =>
-  panel().find('[class*="error"], [class*="alert"], [class*="invalid"]').first();
-
-// ── Helper: guess MIME type from extension ────────────────────────────────────
-const guessMime = (filePath) => {
-  const ext = filePath.split('.').pop().toLowerCase();
-  const map = {
-    png: 'image/png',
-    jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    pdf: 'application/pdf',
-    txt: 'text/plain',
-    ai: 'application/postscript',
-    psd: 'image/vnd.adobe.photoshop',
-  };
-  return map[ext] || 'application/octet-stream';
-};
-
-// ── Helper: type a message (works for textarea and contenteditable) ───────────
-export const typeMessage = (text) => {
-  messageInput().clear().type(text);
-};
-
-// ── Helper: attach one or more fixture files ──────────────────────────────────
-// fixturePaths: string or string[] of paths relative to cypress/fixtures/
-// Example: attachFiles('messages/image.png')
-//          attachFiles(['messages/image.png', 'messages/document.pdf'])
-export const attachFiles = (fixturePaths) => {
-  const paths = Array.isArray(fixturePaths) ? fixturePaths : [fixturePaths];
-  fileInput().selectFile(
-    paths.map((p) => ({ contents: 'cypress/fixtures/' + p, mimeType: guessMime(p) })),
-    { force: true }
-  );
-};
-
-// ── Helper: type text (optional) then click Send ──────────────────────────────
-// Intercept POST before calling this so cy.wait('@alias') works afterward.
-export const sendMessage = (text) => {
-  if (text) typeMessage(text);
-  sendButton().click();
-};
-
-// ── Helper: visit an order and open the messaging panel ──────────────────────
-export const visitOrderMessages = (orderId) => {
-  cy.visit(BASE_URL + '/mypage/orders/' + orderId);
-  openMessages();
-  panel().should('be.visible');
-};
+// Conversation: our messages are .message-sent, staff replies .message-received. A message being
+// sent has .message-pending until the server answers.
+export const sentMessages = () => panel().find('.messaging-layout .message-item.message-sent');
+export const lastSentMessage = () => sentMessages().last();

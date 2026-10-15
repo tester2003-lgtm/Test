@@ -1,5 +1,5 @@
 // Forgot password flow - validation errors + sending reset instructions. Site: BASE_URL in cypress/support/config.js
-// Run: npx cypress run --spec cypress/e2e/auth/ForgotPassword.cy.js
+// Run: npx cypress run --spec cypress/e2e/auth/forgot-password.cy.js
 //
 // The "sends reset instructions" tests need a registered email/password account in
 // cypress.env.json ({ "SP_EMAIL": "...", "SP_PASSWORD": "..." }); without it they are

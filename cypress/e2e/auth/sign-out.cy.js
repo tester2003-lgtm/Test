@@ -1,5 +1,5 @@
 // Sign out - via the header My Account menu and via the footer. Site: BASE_URL in cypress/support/config.js
-// Run: npx cypress run --spec cypress/e2e/auth/SignOut.cy.js
+// Run: npx cypress run --spec cypress/e2e/auth/sign-out.cy.js
 //
 // Needs a registered email/password account in cypress.env.json
 // ({ "SP_EMAIL": "...", "SP_PASSWORD": "..." }); without it every test is skipped.

@@ -8,3 +8,9 @@ cypress/downloads/
 
 # Scratch/explore specs (may contain hardcoded test data)
 cypress/e2e/_*.cy.js
+
+# Draft bug reports written when tests fail (local, not uploaded)
+cypress/bug-reports/
+
+# Stray duplicate scaffold (Cypress created it when the subfolder was opened as a project)
+cypress/cypress/

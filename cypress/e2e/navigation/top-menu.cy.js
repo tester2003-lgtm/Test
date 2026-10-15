@@ -1,7 +1,7 @@
 // Navigation & general — Top menu dropdowns (Stickers, Business Card,
 // Badges & Magnets, Get Samples).
 // Site: BASE_URL in cypress/support/config.js
-// Run: npx cypress run --spec cypress/e2e/navigation/TopMenu.cy.js
+// Run: npx cypress run --spec cypress/e2e/navigation/top-menu.cy.js
 //
 // The product lists below mirror the live menu (Oct 2026). Update them when the
 // catalogue changes — a mismatch means a product was added, removed or renamed.

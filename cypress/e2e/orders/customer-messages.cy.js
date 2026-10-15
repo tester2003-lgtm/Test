@@ -1,392 +1,318 @@
-// Customer "Send a message" — order detail page messaging panel.
+// Customer messages on an order — a logged-in member opens My Orders, opens the most recent order,
+// opens its Messages panel, then tests creating messages (positive and negative cases).
 // Site: BASE_URL in cypress/support/config.js
+// Run: npx cypress open
+//      npx cypress run --spec cypress/e2e/orders/customer-messages.cy.js
 //
-// ── Assumptions (update when real DOM is confirmed) ───────────────────────────
+// Starts logged in via cy.loginByEmail() (MEMBER_EMAIL / MEMBER_PASSWORD in cypress.env.json);
+// the login form itself is tested in auth/login-email.cy.js. The account needs at least one order
+// (the checkout specs create them). No order is placed.
 //
-//  1. Trigger:   a[aria-label="Send a message"] (confirmed from provided HTML)
-//  2. Panel:     opens as an inline section / drawer after clicking the trigger
-//               (selector guessed — see orderMessages.js → panel())
-//  3. Input:     textarea or div[contenteditable] inside the panel
-//               (TODO: verify in DevTools while panel is open)
-//  4. Send btn:  button containing text "Send" or type="submit" inside the panel
-//  5. File input:input[type="file"] inside the panel
-//  6. API:       POST and GET to a URL containing "message" (pattern-matched)
-//               (TODO: replace with exact endpoint from Network tab)
-//  7. Accepted file types: png, jpg, pdf (assumed — TODO: confirm with site rules)
-//  8. Max file size: 10 MB (assumed — TODO: confirm)
-//  9. Timestamps: Asia/Singapore (UTC+8)
-// 10. Empty/whitespace messages: send button is disabled or shows an error
-// 11. HTML in messages: escaped on display, not executed
-// 12. No cleanup API: test data accumulates on the dev order (noted in after())
+// Rules (from the site's message panel code, Oct 2026): a message needs text that isn't only
+// spaces, or at least one file. Files: .doc .docx .xls .xlsx .ppt .pptx .csv .eps .ai .psd .pdf
+// .tif .tiff .zip .png .jpg .jpeg, max 4 files / 50 MB total. Blank lines split a message into
+// paragraphs; single line breaks are kept.
 //
-// ── Setup ─────────────────────────────────────────────────────────────────────
+// Every run sends real test messages (tagged with the run id) to that order on the dev site.
+// There is no cleanup — they stay in the order's conversation.
 //
-//  ORDER_ID in cypress.env.json: order 7732 (belongs to trainee84.glophics@gmail.com)
-//  Login: Google OAuth via UI — requires Chrome headed (Google blocks Electron).
-//  GOOGLE_EMAIL / GOOGLE_PASSWORD in cypress.env.json drive the login.
-//
-//  All tests are skipped when GOOGLE_EMAIL or ORDER_ID are not set, or when
-//  running in Electron (Google blocks headless/Electron automation).
-//
-// ── Run ───────────────────────────────────────────────────────────────────────
-//
-//  npx cypress run --spec cypress/e2e/orders/customer-messages.cy.js
-//
-// ── Future spec ───────────────────────────────────────────────────────────────
-//
-//  cypress/e2e/orders/admin-messages.cy.js — verify customer messages appear
-//  on the admin side and admin replies are visible to the customer. Import
-//  the same page object (orderMessages.js) and add admin-side selectors.
+// One it() per step. testIsolation: false keeps the same browser state across steps; if a step
+// fails, the remaining steps are skipped.
 
 import { BASE_URL } from '../../support/config';
-import * as Msg from '../../support/pages/orderMessages';
+import * as Messages from '../../support/pages/orderMessages';
 
-// ── Login ──────────────────────────────────────────────────────────────────────
-// Uses the email/password account (SP_EMAIL / SP_PASSWORD in cypress.env.json).
-// That account must have at least one completed order — put its ID in ORDER_ID.
-//
-// One-time setup:
-//   1. Log in to dev.singaprinting.com as the SP_EMAIL account from cypress.env.json.
-//   2. Place any order and note the order ID.
-//   3. Set ORDER_ID in cypress.env.json to that value.
-//
-// cy.login() uses cy.session() so the login only runs once per Cypress run.
-const loginForOrders = () => {
-  cy.env(['SP_EMAIL', 'SP_PASSWORD']).then(({ SP_EMAIL, SP_PASSWORD }) => {
-    cy.login(SP_EMAIL, SP_PASSWORD);
+// Tags this run's messages so they can be told apart from earlier runs on the same order.
+const RUN = `cy-${Date.now().toString(36)}`;
+
+const SHORT_MESSAGE = `Hello, this is a short test message. [${RUN}]`;
+// Paragraphs are separated by a blank line; paragraph 2 also has a single line break.
+const PARAGRAPHS = [
+  [`Hi team, this is the first paragraph about my artwork. [${RUN}]`],
+  ['Second paragraph, line one.', 'Second paragraph, line two.'],
+  ['Third paragraph: thank you!'],
+];
+const SPECIAL_MESSAGE = `Special characters ~!@#$%^&*()_+-={}[]|\\:;"',.?/ é ñ ü € £ © [${RUN}]`;
+// The server strips anything that looks like an HTML tag (Oct 2026), so only safety is checked.
+const HTML_MESSAGE = `HTML check <b>bold</b> <script>window.__messageXss = true</script> [${RUN}]`;
+const EMOJI_MESSAGE = `Emoji check 😀 🎉 👍 ❤️ [${RUN}]`;
+const FILES_MESSAGE = `Applicable files attached. [${RUN}]`;
+
+const FIXTURES = 'cypress/fixtures/messages/';
+// 600x600 PNG, the same test artwork the cart specs upload.
+const ARTWORK_IMAGE = 'cypress/fixtures/artwork/sticker-artwork.png';
+const NOT_APPLICABLE_FILES = [
+  { label: '.txt', file: FIXTURES + 'document.txt' },
+  { label: '.exe', file: FIXTURES + 'malware.exe' },
+  { label: '.gif', file: { contents: Cypress.Buffer.from('GIF89a'), fileName: 'animation.gif', mimeType: 'image/gif' } },
+];
+
+const firstOrderRow = () => cy.get('.order_list_row', { timeout: 30000 }).first();
+
+// Close any open form, then start a fresh, empty message.
+const startNewMessage = () => {
+  Messages.panel().then(($panel) => {
+    if ($panel.find('form.message-new__form').length) Messages.cancelButton().click();
   });
+  Messages.newMessageButton().should('be.visible').click();
+  Messages.messageForm().should('be.visible');
+  Messages.messageInput().should('have.value', '');
+  Messages.filePreviews().should('have.length', 0);
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// Set the text the way the page's own input handler expects (cy.type can't type emoji).
+const pasteMessage = (text) => {
+  Messages.messageInput().invoke('val', text).trigger('input').should('have.value', text);
+};
 
-// Unique tag added to every test message so old messages don't interfere.
-const tag = () => `[cy-${Date.now()}-${Math.random().toString(36).slice(2, 6)}]`;
+const watchSendRequests = () => cy.intercept({ method: 'POST', url: /\/api\/message\/send(\?|$)/ }).as('sendMessage');
+const expectNothingSent = () => cy.get('@sendMessage.all').should('have.length', 0);
 
-// Intercept the send-message API call.
-// TODO: replace '**/message**' with the exact POST endpoint once confirmed from
-// the Network tab (e.g. '**/orders/*/messages' or '**/api/message').
-const interceptSend = () => cy.intercept('POST', '**/message**').as('sendMessage');
+// Click Send, wait for the site to accept it, and yield the new message bubble.
+const sendAndGetMessage = () => {
+  watchSendRequests();
+  Messages.sendButton().click();
+  cy.wait('@sendMessage', { timeout: 60000 }).its('response.body.status').should('eq', 'SUCCESS');
+  Messages.messageForm().should('not.exist');
+  return Messages.lastSentMessage().should('not.have.class', 'message-pending');
+};
 
-// Intercept the fetch-messages API call.
-const interceptFetch = () => cy.intercept('GET', '**/message**').as('fetchMessages');
+describe('Customer messages on an order', { testIsolation: false }, () => {
+  let stepFailed = false;
+  // Read from the first row of My Orders: { number, path }
+  const order = {};
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
-describe('Customer messages on an order', () => {
-  let orderId;
-
-  before(function () {
-    cy.env(['ORDER_ID', 'SP_EMAIL', 'SP_PASSWORD']).then(({ ORDER_ID, SP_EMAIL, SP_PASSWORD }) => {
-      if (!ORDER_ID || !SP_EMAIL || !SP_PASSWORD) { this.skip(); return; }
-      orderId = ORDER_ID;
-      loginForOrders();
-    });
+  // testIsolation:false also stops Cypress clearing cookies, so clear them, then log in once.
+  before(() => {
+    cy.clearAllCookies();
+    cy.clearAllLocalStorage();
+    cy.clearAllSessionStorage();
+    cy.loginByEmail();
   });
 
-  beforeEach(() => {
+  beforeEach(function () {
+    if (stepFailed) this.skip();
     cy.viewport(1440, 900);
+    // Third-party scripts (analytics, chat widgets) occasionally throw;
+    // don't let those fail the test.
     cy.on('uncaught:exception', () => false);
-    // Re-use the cached session (cy.login uses cy.session internally).
-    loginForOrders();
   });
 
-  after(() => {
-    // NOTE: There is no public cleanup API for test messages.
-    // Messages sent during this run will accumulate on order 7732.
-    // If this becomes a problem, ask the dev team for a DELETE endpoint
-    // and add cleanup logic here using cy.request().
-    cy.log('Test messages accumulated on order ' + orderId + ' — no cleanup API available.');
+  afterEach(function () {
+    if (this.currentTest.state === 'failed') stepFailed = true;
   });
 
-  // ── 1. Trigger opens the panel ──────────────────────────────────────────────
+  // --- Open the order's messages ---
 
-  it('shows the "Messages" trigger on an order and opens the panel', () => {
-    interceptFetch();
-    cy.visit(`${BASE_URL}/mypage/orders/${orderId}`);
+  it('opens My Orders and shows the most recent order first', () => {
+    cy.visit(BASE_URL + '/mypage/orders');
 
-    Msg.openMessages();
+    firstOrderRow().within(() => {
+      cy.get('.order_number_column').invoke('text').should('match', /^\s*\d+\s*$/);
+      cy.get('.order_date_column').invoke('text').should('match', /\d{4}\/\d{2}\/\d{2}/);
+      cy.get('.order_total_price_column').invoke('text').should('match', /S\$\d/);
+      cy.get('.order_status_column .order_list_status').invoke('text').should('match', /\S/);
+      cy.get('.order_print_columns a.quote_action').should('have.attr', 'href').and('match', /^\/mypage\/orders\/\d+$/);
+    });
 
-    // Wait for any initial message fetch to complete.
-    cy.wait('@fetchMessages', { timeout: 15000 }).its('response.statusCode').should('be.oneOf', [200, 204]);
-
-    Msg.panel().should('be.visible');
-    Msg.messageInput().should('be.visible');
-    Msg.sendButton().should('be.visible');
-  });
-
-  // ── 2. Send plain text ──────────────────────────────────────────────────────
-
-  it('sends a plain text message, it appears in the list, and the input is cleared', () => {
-    const text = `Hello from Cypress ${tag()}`;
-
-    interceptSend();
-    interceptFetch();
-    Msg.visitOrderMessages(orderId);
-    cy.wait('@fetchMessages');
-
-    Msg.sendMessage(text);
-    cy.wait('@sendMessage').its('response.statusCode').should('be.oneOf', [200, 201]);
-
-    // Input should be empty after sending.
-    Msg.messageInput().should('have.value', '').or('have.text', '');
-
-    // The message should appear in the list.
-    Msg.messageItems().last().should('contain', text);
-  });
-
-  // ── 3. Multi-paragraph — line breaks preserved ──────────────────────────────
-
-  it('preserves line breaks in a multi-paragraph message after reload', () => {
-    const uid = tag();
-    const lines = [`Paragraph A ${uid}`, `Paragraph B ${uid}`, `Paragraph C ${uid}`];
-    const text = lines.join('\n\n');
-
-    interceptSend();
-    Msg.visitOrderMessages(orderId);
-
-    Msg.typeMessage(text);
-    Msg.sendButton().click();
-    cy.wait('@sendMessage');
-
-    // Reload and re-open the panel.
-    interceptFetch();
-    cy.reload();
-    Msg.openMessages();
-    cy.wait('@fetchMessages');
-
-    // All three paragraphs should still be visible in the last message.
-    lines.forEach((line) => {
-      Msg.messageItems().last().should('contain', line);
+    firstOrderRow().then(($row) => {
+      order.number = $row.find('.order_number_column').text().trim();
+      order.path = $row.find('.order_print_columns a.quote_action').attr('href');
+      cy.log(`**First order: ${order.number} (${order.path})**`);
     });
   });
 
-  // ── 4. Attach one image — preview shown with loaded pixels ─────────────────
+  it('opens the first order', () => {
+    firstOrderRow().find('.order_print_columns a.quote_action').click();
 
-  it('attaches one image; a thumbnail is shown and the image loads (naturalWidth > 0)', () => {
-    const text = `Image upload test ${tag()}`;
-
-    interceptSend();
-    Msg.visitOrderMessages(orderId);
-
-    Msg.typeMessage(text);
-    Msg.fileInput().selectFile('cypress/fixtures/messages/image.png', { force: true });
-
-    // TODO: if the site shows a preview before sending, assert it here:
-    // Msg.panel().find('img.preview, [class*="preview"] img').should('be.visible');
-
-    Msg.sendButton().click();
-    cy.wait('@sendMessage').its('response.statusCode').should('be.oneOf', [200, 201]);
-
-    // The sent message should contain an image whose pixels actually loaded.
-    Msg.messageItems()
-      .last()
-      .find('img')
-      .should(($img) => {
-        expect($img[0].naturalWidth, 'image naturalWidth').to.be.greaterThan(0);
-      });
+    cy.location('pathname', { timeout: 30000 }).should('eq', order.path);
+    Messages.messageButton().should('be.visible').and('contain', 'Messages');
   });
 
-  // ── 5. Multiple file attachments ────────────────────────────────────────────
+  it('clicks the message button and the Messages panel opens for that order', () => {
+    Messages.messageButton().click();
 
-  it('sends a message with multiple files (up to the allowed maximum)', () => {
-    // TODO: update MAX_FILES to the site's actual limit once confirmed.
-    const MAX_FILES = 5;
-    const fixtures = Array.from({ length: Math.min(MAX_FILES, 2) }, (_, i) =>
-      i % 2 === 0 ? 'cypress/fixtures/messages/image.png' : 'cypress/fixtures/messages/document.pdf'
-    );
-
-    interceptSend();
-    Msg.visitOrderMessages(orderId);
-
-    Msg.typeMessage(`Multi-file upload test ${tag()}`);
-    Msg.fileInput().selectFile(fixtures, { force: true });
-    Msg.sendButton().click();
-    cy.wait('@sendMessage').its('response.statusCode').should('be.oneOf', [200, 201]);
-
-    // At least one attachment should appear in the last message.
-    Msg.messageItems()
-      .last()
-      .find('img, a[href*=".pdf"], [class*="attach"], [class*="file"]')
-      .should('have.length.at.least', 1);
+    Messages.panel().should('be.visible');
+    Messages.panelTitle().should('have.text', `Messages - #${order.number}`);
+    Messages.newMessageButton().should('be.visible');
   });
 
-  // ── 6. Accepted file types (data-driven) ────────────────────────────────────
+  it('clicks "Create Message" and the message form opens', () => {
+    // "Create Message" on a new conversation; "Add Message" / "Respond" once it has messages.
+    Messages.newMessageButton().invoke('text').should('match', /^\s*(Create Message|Add Message|Respond)\s*$/);
+    startNewMessage();
+    Messages.sendButton().should('be.visible');
+    Messages.cancelButton().should('be.visible');
+  });
 
-  // TODO: update ACCEPTED_FILES to the site's actual accepted types and
-  // add real fixture files for each. Currently testing png, pdf, txt.
-  const ACCEPTED_FILES = [
-    { label: 'PNG image', fixture: 'cypress/fixtures/messages/image.png' },
-    { label: 'PDF document', fixture: 'cypress/fixtures/messages/document.pdf' },
-    { label: 'text file', fixture: 'cypress/fixtures/messages/document.txt' },
-  ];
+  // --- Negative: nothing should be sent ---
 
-  ACCEPTED_FILES.forEach(({ label, fixture }) => {
-    it(`accepts a ${label} attachment`, () => {
-      interceptSend();
-      Msg.visitOrderMessages(orderId);
+  it('does not send an empty message', () => {
+    watchSendRequests();
+    startNewMessage();
+    Messages.sendButton().click();
 
-      Msg.typeMessage(`${label} upload test ${tag()}`);
-      Msg.fileInput().selectFile(fixture, { force: true });
+    Messages.messageRequiredError().should('have.text', 'Your message is required. Please try again.');
+    Messages.messageInput().should('have.class', 'g-textarea-main--error');
+    expectNothingSent();
+  });
 
-      // File should NOT produce an inline error.
-      Msg.panel()
-        .find('[class*="error"], [class*="alert"]')
-        .should('not.exist')
-        .or('not.be.visible');
+  it('does not send a message of only spaces', () => {
+    watchSendRequests();
+    startNewMessage();
+    Messages.messageInput().type('      ');
+    Messages.sendButton().click();
 
-      Msg.sendButton().click();
-      cy.wait('@sendMessage').its('response.statusCode').should('be.oneOf', [200, 201]);
+    Messages.messageRequiredError().should('have.text', 'Your message is required. Please try again.');
+    expectNothingSent();
+  });
+
+  NOT_APPLICABLE_FILES.forEach(({ label, file }) => {
+    it(`rejects a ${label} file (not an applicable file type)`, () => {
+      watchSendRequests();
+      startNewMessage();
+      Messages.fileInput().selectFile(file, { force: true });
+
+      Messages.fileError().should('have.text', 'Upload failed. Unsupported filetype.');
+      Messages.filePreviews().should('have.length', 0);
+      expectNothingSent();
     });
   });
 
-  // ── 7. Unsupported file type is rejected ────────────────────────────────────
+  it('rejects more than 4 files', () => {
+    startNewMessage();
+    Messages.fileInput().selectFile(Array(5).fill(FIXTURES + 'image.png'), { force: true });
 
-  it('rejects an unsupported file type (.exe) with an error before sending', () => {
-    interceptSend();
-    Msg.visitOrderMessages(orderId);
-
-    Msg.typeMessage(`Invalid file type test ${tag()}`);
-    Msg.fileInput().selectFile('cypress/fixtures/messages/malware.exe', { force: true });
-
-    // The error must appear without clicking Send.
-    // TODO: verify the error selector once the real DOM is known.
-    Msg.errorMessage().should('be.visible');
-
-    // Send button should remain disabled OR the API should NOT be called.
-    // Option A: send button disabled
-    // Msg.sendButton().should('be.disabled');
-    // Option B: clicking send does NOT call the API (comment out the above and use this):
-    Msg.sendButton().click();
-    cy.get('@sendMessage.all').should('have.length', 0);
+    Messages.fileError().should('have.text', 'Maximum number of files exceeded. Only 4 files is allowed.');
+    Messages.filePreviews().should('have.length', 0);
   });
 
-  // ── 8. Oversized file is rejected ──────────────────────────────────────────
-
-  it('rejects a file over the size limit with an error', () => {
-    // Generate a >10 MB buffer programmatically — no large binary in the repo.
-    // TODO: update MAX_BYTES to the real size limit.
-    const MAX_BYTES = 10 * 1024 * 1024 + 1; // 10 MB + 1 byte
-
-    interceptSend();
-    Msg.visitOrderMessages(orderId);
-
-    Msg.fileInput().selectFile(
-      {
-        contents: Cypress.Buffer.alloc(MAX_BYTES, 'x'),
-        fileName: 'oversized.png',
-        mimeType: 'image/png',
-      },
+  it('rejects files over 50 MB in total', () => {
+    startNewMessage();
+    // Generated in memory (50 MB + 1 byte) — rejected before anything is uploaded.
+    Messages.fileInput().selectFile(
+      { contents: Cypress.Buffer.alloc(50 * 1024 * 1024 + 1), fileName: 'oversized.pdf', mimeType: 'application/pdf' },
       { force: true }
     );
 
-    // Error should appear without clicking Send.
-    Msg.errorMessage().should('be.visible');
-
-    // Clicking Send should NOT call the API.
-    Msg.sendButton().click();
-    cy.get('@sendMessage.all').should('have.length', 0);
+    Messages.fileError().should('have.text', 'Maximum total file size exceeded. Only 50 MB total is allowed.');
+    Messages.filePreviews().should('have.length', 0);
   });
 
-  // ── 9. Whitespace-only message cannot be sent ───────────────────────────────
+  it('cancels a message without sending it', () => {
+    watchSendRequests();
+    startNewMessage();
+    Messages.messageInput().type(`This message is cancelled. [${RUN}]`);
+    Messages.fileInput().selectFile(FIXTURES + 'image.png', { force: true });
+    Messages.filePreviews().should('have.length', 1);
 
-  it('cannot send a whitespace-only message', () => {
-    interceptSend();
-    Msg.visitOrderMessages(orderId);
+    Messages.cancelButton().click();
 
-    Msg.typeMessage('   ');
-    Msg.sendButton().click();
-
-    // Either the button stays disabled, or the API is never called.
-    // Option A: expect send button to be disabled (uncomment if applicable):
-    // Msg.sendButton().should('be.disabled');
-
-    // Option B: expect an inline validation error:
-    // Msg.errorMessage().should('be.visible');
-
-    // Either way, the POST API must NOT be called.
-    cy.get('@sendMessage.all').should('have.length', 0);
+    Messages.messageForm().should('not.exist');
+    Messages.newMessageButton().should('be.visible');
+    expectNothingSent();
+    Messages.panel().should('not.contain', 'This message is cancelled.');
   });
 
-  // ── 10. Timestamp is correct (within 1 minute) ─────────────────────────────
+  // --- Positive: these are sent ---
 
-  it('shows a timestamp close to the send time (within 1 minute)', () => {
-    const text = `Timestamp test ${tag()}`;
+  it('sends a short message', () => {
+    startNewMessage();
+    Messages.messageInput().type(SHORT_MESSAGE);
 
-    interceptSend();
-    Msg.visitOrderMessages(orderId);
+    sendAndGetMessage().find('.message-content p').should('have.length', 1).and('have.text', SHORT_MESSAGE);
+    Messages.lastSentMessage().find('.message-date').invoke('text').should('match', /\S/);
+  });
 
-    // Capture wall-clock time just before sending (in SGT = UTC+8).
-    const SGT_OFFSET_MS = 8 * 60 * 60 * 1000;
-    const beforeSend = new Date(Date.now() + SGT_OFFSET_MS);
+  it('sends a message in paragraphs and keeps its format', () => {
+    startNewMessage();
+    // {enter} = line break; a blank line between paragraphs.
+    Messages.messageInput().type(PARAGRAPHS.map((lines) => lines.join('{enter}')).join('{enter}{enter}'));
 
-    Msg.sendMessage(text);
-    cy.wait('@sendMessage');
-
-    // Find the timestamp on the last message.
-    // TODO: update '[class*="timestamp"], [class*="time"]' to the real selector.
-    // TODO: update the date parsing logic to match the site's actual format,
-    //   e.g. "14 Oct 2026, 3:45 PM" → new Date('14 Oct 2026 15:45:00 +0800')
-    Msg.messageItems()
-      .last()
-      .find('[class*="timestamp"], [class*="time"], time')
-      .invoke('text')
-      .then((rawTime) => {
-        cy.log('Raw timestamp from site: ' + rawTime);
-        // TODO: parse rawTime to a Date object. Example for "14 Oct 2026, 3:45 PM":
-        // const sentAt = new Date(rawTime.replace(',', '') + ' +0800');
-        // expect(Math.abs(sentAt - beforeSend), 'timestamp drift (ms)').to.be.lessThan(60_000);
+    // Checks what the customer sees (innerText follows the displayed line breaks): a blank line
+    // between paragraphs and the line break inside paragraph 2. The server stores line breaks as
+    // \r\n, so the site shows the paragraphs in one <p>, not one <p> each.
+    sendAndGetMessage()
+      .find('.message-content')
+      .should(($content) => {
+        const shown = $content[0].innerText.replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim();
+        expect(shown, 'message as displayed').to.equal(PARAGRAPHS.map((lines) => lines.join('\n')).join('\n\n'));
       });
   });
 
-  // ── 11. Messages persist after reload in chronological order ───────────────
+  it('sends a message with special characters, kept exactly as typed', () => {
+    startNewMessage();
+    Messages.messageInput().type(SPECIAL_MESSAGE, { parseSpecialCharSequences: false });
 
-  it('messages persist after reload and are in chronological order', () => {
-    const [textA, textB] = [`First message ${tag()}`, `Second message ${tag()}`];
+    sendAndGetMessage().find('.message-content p').should('have.text', SPECIAL_MESSAGE);
+  });
 
-    interceptSend();
-    Msg.visitOrderMessages(orderId);
+  it('sends a message containing HTML and script tags without running them', () => {
+    startNewMessage();
+    Messages.messageInput().type(HTML_MESSAGE, { parseSpecialCharSequences: false });
 
-    Msg.sendMessage(textA);
-    cy.wait('@sendMessage');
+    sendAndGetMessage().within(() => {
+      cy.get('.message-content').should('contain', 'bold').and('contain', RUN);
+      cy.get('.message-content b, .message-content script').should('not.exist');
+    });
+    cy.window().its('__messageXss').should('be.undefined');
+  });
 
-    Msg.sendMessage(textB);
-    cy.wait('@sendMessage');
+  it('sends a message with emoji', () => {
+    startNewMessage();
+    pasteMessage(EMOJI_MESSAGE);
 
-    // Reload and reopen the panel.
-    interceptFetch();
-    cy.reload();
-    Msg.openMessages();
-    cy.wait('@fetchMessages');
+    sendAndGetMessage().find('.message-content p').should('have.text', EMOJI_MESSAGE);
+  });
 
-    // Both messages should be visible; B should appear after A.
-    Msg.messageItems().then(($items) => {
-      const texts = [...$items].map((el) => el.innerText);
-      const idxA = texts.findIndex((t) => t.includes(textA));
-      const idxB = texts.findIndex((t) => t.includes(textB));
-      expect(idxA, 'first message index').to.be.greaterThan(-1);
-      expect(idxB, 'second message index').to.be.greaterThan(-1);
-      expect(idxA, 'A appears before B').to.be.lessThan(idxB);
+  it('sends applicable files, adding more with "Select Files" up to 4', () => {
+    startNewMessage();
+    Messages.fileInput().selectFile(ARTWORK_IMAGE, { force: true });
+    Messages.filePreviews().should('have.length', 1);
+
+    // After the first file, "Select Files" adds more.
+    Messages.addMoreFilesButton().should('be.visible').and('contain', 'Select Files');
+    Messages.addMoreFilesInput().selectFile(
+      [FIXTURES + 'document.pdf', FIXTURES + 'spec-sheet.csv', FIXTURES + 'artwork-files.zip'],
+      { force: true }
+    );
+    Messages.filePreviews().should('have.length', 4);
+    Messages.filePreviews()
+      .find('figure')
+      .then(($figures) => [...$figures].map((f) => f.title))
+      .should('deep.equal', ['sticker-artwork.png', 'document.pdf', 'spec-sheet.csv', 'artwork-files.zip']);
+    // 4 is the maximum: no way to add more.
+    Messages.addMoreFilesButton().should('not.exist');
+
+    // Removing one brings "Select Files" back.
+    Messages.removeFileButtons().last().click();
+    Messages.filePreviews().should('have.length', 3);
+    Messages.addMoreFilesButton().should('be.visible');
+    Messages.addMoreFilesInput().selectFile(FIXTURES + 'artwork-files.zip', { force: true });
+    Messages.filePreviews().should('have.length', 4);
+
+    Messages.messageInput().type(FILES_MESSAGE);
+    sendAndGetMessage().within(() => {
+      cy.get('.message-content p').should('have.text', FILES_MESSAGE);
+      cy.get('.message-attachments .message-attachment-item').should('have.length', 4);
+      // The image is shown from storage, which can take a moment after the upload.
+      cy.get('.message-attachment-image', { timeout: 15000 }).should(($img) => {
+        expect($img[0].naturalWidth, 'image attachment displayed').to.equal(600);
+      });
     });
   });
 
-  // ── 12. HTML / script is escaped, not executed ─────────────────────────────
+  it('keeps the sent messages after the page is reloaded', () => {
+    cy.reload();
+    Messages.messageButton().click();
+    Messages.panel().should('be.visible');
 
-  it('renders HTML and script tags as plain text, not as HTML or executed JS', () => {
-    const payload = `<b>bold</b><script>window.__xss_${Date.now()} = true</script> ${tag()}`;
-
-    interceptSend();
-    Msg.visitOrderMessages(orderId);
-
-    Msg.sendMessage(payload);
-    cy.wait('@sendMessage');
-
-    // The literal angle-bracket characters must appear as text.
-    Msg.messageItems().last().should('contain', '<b>bold</b>');
-
-    // The <script> must NOT have executed — window property should be undefined.
-    cy.window().then((win) => {
-      const key = Object.keys(win).find((k) => k.startsWith('__xss_'));
-      expect(key, 'XSS script executed').to.be.undefined;
+    const sentTexts = [SHORT_MESSAGE, PARAGRAPHS[0][0], SPECIAL_MESSAGE, EMOJI_MESSAGE, FILES_MESSAGE];
+    Messages.sentMessages().should(($messages) => {
+      const all = $messages.text();
+      sentTexts.forEach((text) => expect(all, 'conversation').to.contain(text));
     });
+    // short, paragraphs, special characters, HTML, emoji, files
+    Messages.sentMessages().filter(`:contains("${RUN}")`).should('have.length', 6);
   });
 });
